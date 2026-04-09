@@ -1,0 +1,69 @@
+{
+  "name": "local-todo-notes",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Windows desktop todo and notes app with Apple Notes inspired layout.",
+  "main": "electron/main.cjs",
+  "type": "module",
+  "productName": "暖笺待办",
+  "scripts": {
+    "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:electron\"",
+    "dev:renderer": "vite --host 127.0.0.1",
+    "dev:electron": "wait-on tcp:5173 && electron .",
+    "build": "tsc && vite build",
+    "build:icon": "node scripts/build-icon.mjs",
+    "start": "concurrently -k \"npm:start:renderer\" \"npm:start:electron\"",
+    "start:renderer": "vite preview --host 127.0.0.1 --port 4173 --strictPort",
+    "start:electron": "wait-on tcp:4173 && electron .",
+    "dist:win": "npm run build && npm run build:icon && electron-builder --win nsis --x64"
+  },
+  "build": {
+    "appId": "com.myobject.localtodonotes",
+    "productName": "暖笺待办",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "暖笺待办",
+      "artifactName": "暖笺待办-安装包-${version}.${ext}"
+    }
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.3",
+    "concurrently": "^9.1.2",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "pngjs": "^7.0.0",
+    "to-ico": "^1.1.5",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.3",
+    "wait-on": "^8.0.1"
+  }
+}
