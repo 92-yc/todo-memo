@@ -20,3 +20,8 @@ export interface AppStore {
   notes: NoteItem[];
   selectedNoteId: string | null;
 }
+
+export interface AppPreferences {
+  launchAtLogin: boolean;
+  minimizeToTrayOnClose: boolean;
+}

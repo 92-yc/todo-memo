@@ -1,14 +1,32 @@
-const { app, BrowserWindow, dialog, globalShortcut, ipcMain } = require("electron");
+const {
+  app,
+  BrowserWindow,
+  dialog,
+  globalShortcut,
+  ipcMain,
+  Menu,
+  Tray,
+  nativeImage
+} = require("electron");
 const path = require("node:path");
 const fs = require("node:fs/promises");
 
 const STORE_FILE = "todo-notes-store.json";
+const PREFERENCES_FILE = "app-preferences.json";
 const CANDIDATE_URLS = ["http://127.0.0.1:5173", "http://127.0.0.1:4173"];
 const GLOBAL_SHORTCUT = "CommandOrControl+Alt+N";
+const defaultPreferences = {
+  launchAtLogin: false,
+  minimizeToTrayOnClose: true
+};
 
 let mainWindow = null;
+let tray = null;
+let isQuitting = false;
+let preferences = { ...defaultPreferences };
 
 app.disableHardwareAcceleration();
+app.setAppUserModelId("com.myobject.localtodonotes");
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -18,10 +36,30 @@ function getStorePath() {
   return path.join(app.getPath("userData"), STORE_FILE);
 }
 
+function getPreferencesPath() {
+  return path.join(app.getPath("userData"), PREFERENCES_FILE);
+}
+
+function normalizePreferences(payload) {
+  return {
+    launchAtLogin: Boolean(payload?.launchAtLogin),
+    minimizeToTrayOnClose:
+      payload?.minimizeToTrayOnClose === undefined
+        ? true
+        : Boolean(payload.minimizeToTrayOnClose)
+  };
+}
+
 async function ensureStore(payload) {
   const storePath = getStorePath();
   await fs.mkdir(path.dirname(storePath), { recursive: true });
   await fs.writeFile(storePath, JSON.stringify(payload, null, 2), "utf-8");
+}
+
+async function savePreferences(nextPreferences) {
+  const preferencesPath = getPreferencesPath();
+  await fs.mkdir(path.dirname(preferencesPath), { recursive: true });
+  await fs.writeFile(preferencesPath, JSON.stringify(nextPreferences, null, 2), "utf-8");
 }
 
 async function loadStore() {
@@ -34,6 +72,22 @@ async function loadStore() {
     }
     throw error;
   }
+}
+
+async function loadPreferences() {
+  try {
+    const raw = await fs.readFile(getPreferencesPath(), "utf-8");
+    return normalizePreferences(JSON.parse(raw));
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return { ...defaultPreferences };
+    }
+    throw error;
+  }
+}
+
+function getTrayIconPath() {
+  return path.join(__dirname, "..", "build", "icon.png");
 }
 
 function attachDebugLogging(win) {
@@ -72,6 +126,17 @@ async function resolveRendererTarget() {
   };
 }
 
+function applyLaunchAtLogin() {
+  if (!app.isPackaged) {
+    return;
+  }
+
+  app.setLoginItemSettings({
+    openAtLogin: preferences.launchAtLogin,
+    path: process.execPath
+  });
+}
+
 function showMainWindow() {
   if (!mainWindow || mainWindow.isDestroyed()) {
     return;
@@ -81,8 +146,18 @@ function showMainWindow() {
     mainWindow.restore();
   }
 
+  mainWindow.setSkipTaskbar(false);
   mainWindow.show();
   mainWindow.focus();
+}
+
+function hideToTray() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+
+  mainWindow.hide();
+  mainWindow.setSkipTaskbar(true);
 }
 
 async function handleGlobalShortcut() {
@@ -103,13 +178,90 @@ function registerGlobalShortcuts() {
   });
 }
 
+function updateTrayMenu() {
+  if (!tray) {
+    return;
+  }
+
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      {
+        label: "显示主窗口",
+        click: () => {
+          showMainWindow();
+        }
+      },
+      {
+        label: "开机自启动",
+        type: "checkbox",
+        checked: preferences.launchAtLogin,
+        click: () => {
+          void updatePreferences({ launchAtLogin: !preferences.launchAtLogin });
+        }
+      },
+      {
+        label: "关闭时隐藏到托盘",
+        type: "checkbox",
+        checked: preferences.minimizeToTrayOnClose,
+        click: () => {
+          void updatePreferences({
+            minimizeToTrayOnClose: !preferences.minimizeToTrayOnClose
+          });
+        }
+      },
+      { type: "separator" },
+      {
+        label: "退出",
+        click: () => {
+          isQuitting = true;
+          app.quit();
+        }
+      }
+    ])
+  );
+}
+
+function createTray() {
+  if (tray) {
+    updateTrayMenu();
+    return;
+  }
+
+  const trayIcon = nativeImage.createFromPath(getTrayIconPath()).resize({
+    width: 18,
+    height: 18
+  });
+
+  tray = new Tray(trayIcon);
+  tray.setToolTip(`暖笺待办 (${GLOBAL_SHORTCUT})`);
+  tray.on("click", () => {
+    showMainWindow();
+  });
+  tray.on("double-click", () => {
+    showMainWindow();
+  });
+  updateTrayMenu();
+}
+
+async function updatePreferences(patch) {
+  preferences = normalizePreferences({
+    ...preferences,
+    ...patch
+  });
+
+  await savePreferences(preferences);
+  applyLaunchAtLogin();
+  updateTrayMenu();
+  return preferences;
+}
+
 async function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1480,
     height: 920,
     minWidth: 1180,
     minHeight: 760,
-    title: "Local Todo Notes",
+    title: "暖笺待办",
     backgroundColor: "#f6f0e8",
     autoHideMenuBar: true,
     show: true,
@@ -118,6 +270,15 @@ async function createWindow() {
       contextIsolation: true,
       nodeIntegration: false
     }
+  });
+
+  mainWindow.on("close", (event) => {
+    if (isQuitting || !preferences.minimizeToTrayOnClose) {
+      return;
+    }
+
+    event.preventDefault();
+    hideToTray();
   });
 
   mainWindow.on("closed", () => {
@@ -178,11 +339,22 @@ ipcMain.handle("backup:import", async () => {
   return { ok: true, payload };
 });
 
+ipcMain.handle("preferences:get", async () => {
+  return preferences;
+});
+
+ipcMain.handle("preferences:update", async (_, patch) => {
+  return updatePreferences(patch ?? {});
+});
+
 app.on("second-instance", () => {
   showMainWindow();
 });
 
 app.whenReady().then(async () => {
+  preferences = await loadPreferences();
+  applyLaunchAtLogin();
+  createTray();
   await createWindow();
   registerGlobalShortcuts();
 
@@ -194,6 +366,10 @@ app.whenReady().then(async () => {
 
     showMainWindow();
   });
+});
+
+app.on("before-quit", () => {
+  isQuitting = true;
 });
 
 app.on("window-all-closed", () => {

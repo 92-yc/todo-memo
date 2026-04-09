@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { AppStore, NoteItem } from "./types";
+import type { AppPreferences, AppStore, NoteItem } from "./types";
 
 const palette = [
   "#f5e2d0",
@@ -15,6 +15,11 @@ const categoryLabels: Record<NoteItem["category"], string> = {
   upcoming: "计划中",
   ideas: "灵感",
   archive: "已归档"
+};
+
+const defaultPreferences: AppPreferences = {
+  launchAtLogin: false,
+  minimizeToTrayOnClose: true
 };
 
 const initialStore: AppStore = {
@@ -64,6 +69,10 @@ function formatTime(value: string) {
   }).format(new Date(value));
 }
 
+function withAlpha(hex: string, alpha: string) {
+  return `${hex}${alpha}`;
+}
+
 function sortNotes(notes: NoteItem[]) {
   return [...notes].sort((a, b) => {
     if (a.pinned !== b.pinned) {
@@ -76,6 +85,7 @@ function sortNotes(notes: NoteItem[]) {
 
 function App() {
   const [store, setStore] = useState<AppStore>(initialStore);
+  const [preferences, setPreferences] = useState<AppPreferences>(defaultPreferences);
   const [search, setSearch] = useState("");
   const [isLoaded, setIsLoaded] = useState(false);
   const [statusText, setStatusText] = useState("本地自动保存已开启");
@@ -84,11 +94,14 @@ function App() {
     let cancelled = false;
 
     async function hydrate() {
-      const saved = await window.todoNotesApi?.loadStore();
+      const [savedStore, savedPreferences] = await Promise.all([
+        window.todoNotesApi?.loadStore(),
+        window.todoNotesApi?.getPreferences()
+      ]);
+
       if (!cancelled) {
-        setStore(saved ?? initialStore);
-      }
-      if (!cancelled) {
+        setStore(savedStore ?? initialStore);
+        setPreferences(savedPreferences ?? defaultPreferences);
         setIsLoaded(true);
       }
     }
@@ -147,6 +160,18 @@ function App() {
 
   function updateStore(updater: (current: AppStore) => AppStore) {
     setStore((current) => updater(current));
+  }
+
+  async function updatePreferences(patch: Partial<AppPreferences>, successText: string) {
+    try {
+      const next = await window.todoNotesApi?.updatePreferences(patch);
+      if (next) {
+        setPreferences(next);
+        setStatusText(successText);
+      }
+    } catch {
+      setStatusText("设置保存失败，请重试");
+    }
   }
 
   function selectNote(noteId: string) {
@@ -232,7 +257,7 @@ function App() {
         <div className="brand-card">
           <div>
             <p className="eyebrow">Windows 便签待办</p>
-            <h1>Local Todo Notes</h1>
+            <h1>暖笺待办</h1>
           </div>
           <button className="primary-btn" onClick={createNote}>
             新建便签
@@ -337,7 +362,15 @@ function App() {
             </div>
 
             <section className="editor-grid">
-              <div className="note-editor">
+              <div
+                className="note-editor"
+                style={{
+                  background: `linear-gradient(180deg, ${withAlpha(
+                    activeNote.color,
+                    "D8"
+                  )} 0%, rgba(255, 249, 242, 0.94) 38%)`
+                }}
+              >
                 <textarea
                   value={activeNote.body}
                   onChange={(event) =>
@@ -349,21 +382,26 @@ function App() {
                   placeholder="像苹果备忘录一样自由记录内容..."
                 />
 
-                <div className="color-row">
-                  {palette.map((color) => (
-                    <button
-                      key={color}
-                      className={`color-dot ${activeNote.color === color ? "selected" : ""}`}
-                      style={{ background: color }}
-                      onClick={() =>
-                        patchNote(activeNote.id, (note) => ({
-                          ...note,
-                          color
-                        }))
-                      }
-                      aria-label={`切换颜色 ${color}`}
-                    />
-                  ))}
+                <div className="editor-footer">
+                  <div className="color-panel">
+                    <span className="color-label">便签颜色</span>
+                    <div className="color-row">
+                      {palette.map((color) => (
+                        <button
+                          key={color}
+                          className={`color-dot ${activeNote.color === color ? "selected" : ""}`}
+                          style={{ background: color }}
+                          onClick={() =>
+                            patchNote(activeNote.id, (note) => ({
+                              ...note,
+                              color
+                            }))
+                          }
+                          aria-label={`切换颜色 ${color}`}
+                        />
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -480,6 +518,50 @@ function App() {
         </div>
 
         <div className="inspector-card">
+          <p className="eyebrow">桌面优化</p>
+          <div className="toggle-list">
+            <label className="toggle-row">
+              <div>
+                <strong>关闭时隐藏到托盘</strong>
+                <p>点右上角关闭后不退出，改为驻留在系统托盘。</p>
+              </div>
+              <input
+                type="checkbox"
+                checked={preferences.minimizeToTrayOnClose}
+                onChange={(event) =>
+                  void updatePreferences(
+                    { minimizeToTrayOnClose: event.target.checked },
+                    event.target.checked ? "关闭时将隐藏到托盘" : "关闭时将直接退出"
+                  )
+                }
+              />
+            </label>
+            <label className="toggle-row">
+              <div>
+                <strong>开机自启动</strong>
+                <p>安装版更适合开启，启动后能更快用快捷键呼出。</p>
+              </div>
+              <input
+                type="checkbox"
+                checked={preferences.launchAtLogin}
+                onChange={(event) =>
+                  void updatePreferences(
+                    { launchAtLogin: event.target.checked },
+                    event.target.checked ? "已开启开机自启动" : "已关闭开机自启动"
+                  )
+                }
+              />
+            </label>
+          </div>
+        </div>
+
+        <div className="inspector-card">
+          <p className="eyebrow">快捷方式</p>
+          <p className="helper-text">全局快捷键：Ctrl + Alt + N</p>
+          <p className="helper-text">托盘菜单可直接显示主窗口或退出程序。</p>
+        </div>
+
+        <div className="inspector-card">
           <p className="eyebrow">数据管理</p>
           <button className="ghost-btn wide" onClick={exportBackup}>
             导出备份
@@ -488,17 +570,9 @@ function App() {
             导入备份
           </button>
         </div>
-
-        <div className="inspector-card">
-          <p className="eyebrow">使用建议</p>
-          <p className="helper-text">
-            左边用来快速切换便签，中间像记事本一样写内容，右边专门追踪待办完成情况。
-          </p>
-        </div>
       </aside>
     </div>
   );
 }
 
 export default App;
-

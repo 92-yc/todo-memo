@@ -25,6 +25,7 @@
     },
     "files": [
       "dist/**/*",
+      "build/**/*",
       "electron/**/*",
       "package.json"
     ],

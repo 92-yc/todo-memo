@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-import type { AppStore } from "./types";
+import type { AppPreferences, AppStore } from "./types";
 
 interface TodoNotesApi {
   loadStore: () => Promise<AppStore | null>;
@@ -13,6 +13,8 @@ interface TodoNotesApi {
     canceled?: boolean;
     payload?: AppStore;
   }>;
+  getPreferences: () => Promise<AppPreferences>;
+  updatePreferences: (payload: Partial<AppPreferences>) => Promise<AppPreferences>;
 }
 
 declare global {
